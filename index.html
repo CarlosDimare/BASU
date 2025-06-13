@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -9,179 +10,391 @@
       margin: 0;
       background: #111;
       overflow: hidden;
+      font-family: 'Courier New', monospace;
     }
     canvas {
       display: block;
       margin: auto;
-      background: #444;
+      background: #2d5a27;
       image-rendering: pixelated;
+      border: 2px solid #333;
+    }
+    .ui {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-size: 14px;
     }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas" width="480" height="800"></canvas>
+  <div class="ui">
+    <div>Puntos: <span id="score">0</span></div>
+    <div>Lanzamientos: <span id="shots">5</span></div>
+    <div>Racha: <span id="streak">0</span></div>
+    <div style="margin-top: 10px; font-size: 12px;">
+      Flechas: Mover | Espacio: Apuntar | A: Lanzar
+    </div>
+  </div>
+  
   <script>
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
 
     const keys = {};
-    document.addEventListener('keydown', (e) => keys[e.key] = true);
-    document.addEventListener('keyup', (e) => keys[e.key] = false);
+    let isAiming = false;
+    let aimAngle = -Math.PI / 2; // Apuntando hacia arriba inicialmente
+    let aimPower = 0;
+    let powerDirection = 1;
+
+    document.addEventListener('keydown', (e) => {
+      keys[e.key] = true;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (player.hasBag && !isAiming) {
+          isAiming = true;
+          aimPower = 0;
+        }
+      }
+    });
+    
+    document.addEventListener('keyup', (e) => {
+      keys[e.key] = false;
+      if (e.key === ' ') {
+        isAiming = false;
+      }
+    });
 
     const player = {
       x: 240,
       y: 700,
-      w: 20,
-      h: 20,
-      speed: 4,
+      w: 24,
+      h: 32,
+      speed: 5,
       hasBag: false,
       holding: null,
     };
 
     const truck = {
       x: 190,
-      y: 400,
+      y: 380,
       w: 100,
-      h: 180
+      h: 200
     };
 
     const bags = [];
+    const particles = [];
     const score = { value: 0, streak: 0, shots: 5 };
 
     const scrollSpeed = 2;
     let backgroundOffset = 0;
 
+    // Mejorar aparición de bolsas
     function spawnBag() {
-      const side = Math.random() < 0.5 ? 1 : -1;
-      const offsetX = Math.random() * 120;
+      const side = Math.random() < 0.5 ? 0 : 1; // 0 = izquierda, 1 = derecha
+      const streetWidth = 180;
+      const sideWidth = (canvas.width - streetWidth) / 2;
+      
+      let x;
+      if (side === 0) {
+        // Lado izquierdo
+        x = Math.random() * (sideWidth - 30) + 15;
+      } else {
+        // Lado derecho
+        x = canvas.width - sideWidth + Math.random() * (sideWidth - 30) + 15;
+      }
+      
       bags.push({
-        x: 240 + side * (40 + offsetX),
-        y: canvas.height + Math.random() * 200,
-        r: 12,
+        x: x,
+        y: canvas.height + Math.random() * 300,
+        r: 8,
         vx: 0,
         vy: 0,
         active: true,
-        grabbed: false
+        grabbed: false,
+        color: `hsl(${Math.random() * 60 + 15}, 70%, 50%)` // Colores variados
       });
     }
 
     function spawnBagsPeriodically() {
-      if (bags.filter(b => b.active).length < 50) {
-        for (let i = 0; i < 5; i++) spawnBag();
+      if (bags.filter(b => b.active).length < 15) {
+        for (let i = 0; i < 3; i++) {
+          setTimeout(() => spawnBag(), i * 500);
+        }
       }
     }
 
-    setInterval(spawnBagsPeriodically, 1000);
-    for (let i = 0; i < 30; i++) spawnBag();
+    setInterval(spawnBagsPeriodically, 2000);
+    for (let i = 0; i < 12; i++) spawnBag();
 
+    // Sistema de lanzamiento mejorado
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'a' && player.hasBag && player.holding) {
-        const dx = (truck.x + truck.w / 2 - player.x) * 0.1;
-        const dy = (truck.y + truck.h / 2 - player.y) * 0.1;
+      if (e.key === 'a' && player.hasBag && player.holding && isAiming) {
+        const power = aimPower / 100;
+        const dx = Math.cos(aimAngle) * power * 15;
+        const dy = Math.sin(aimAngle) * power * 15;
+        
         player.holding.vx = dx;
         player.holding.vy = dy;
         player.holding.grabbed = false;
         player.holding = null;
         player.hasBag = false;
         score.shots--;
+        isAiming = false;
+        
+        // Partículas de lanzamiento
+        for (let i = 0; i < 5; i++) {
+          particles.push({
+            x: player.x + player.w / 2,
+            y: player.y + player.h / 2,
+            vx: (Math.random() - 0.5) * 4,
+            vy: (Math.random() - 0.5) * 4,
+            life: 20,
+            maxLife: 20
+          });
+        }
       }
     });
 
     function update() {
+      // Movimiento del jugador
       if (keys['ArrowLeft']) player.x -= player.speed;
       if (keys['ArrowRight']) player.x += player.speed;
-      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+      player.x = Math.max(10, Math.min(canvas.width - player.w - 10, player.x));
+
+      // Sistema de apuntado
+      if (isAiming && player.hasBag) {
+        if (keys['ArrowLeft']) aimAngle -= 0.05;
+        if (keys['ArrowRight']) aimAngle += 0.05;
+        
+        // Limitar ángulo de apuntado
+        aimAngle = Math.max(-Math.PI, Math.min(0, aimAngle));
+        
+        // Potencia oscilante
+        aimPower += powerDirection * 3;
+        if (aimPower >= 100) {
+          aimPower = 100;
+          powerDirection = -1;
+        } else if (aimPower <= 20) {
+          aimPower = 20;
+          powerDirection = 1;
+        }
+      }
 
       backgroundOffset += scrollSpeed;
 
+      // Mover bolsas con el scroll
       for (let bag of bags) {
         if (!bag.grabbed) bag.y -= scrollSpeed;
       }
 
+      // Recolección de bolsas
       for (let bag of bags) {
         if (!bag.active || bag.grabbed) continue;
         const dx = player.x + player.w / 2 - bag.x;
         const dy = player.y + player.h / 2 - bag.y;
-        if (Math.sqrt(dx * dx + dy * dy) < bag.r + player.w / 2) {
+        if (Math.sqrt(dx * dx + dy * dy) < bag.r + player.w / 2 && !player.hasBag) {
           player.holding = bag;
           player.hasBag = true;
           bag.grabbed = true;
         }
       }
 
+      // Física de bolsas
       for (let bag of bags) {
         if (!bag.active) continue;
         if (bag.grabbed) {
           bag.x = player.x + player.w / 2;
-          bag.y = player.y;
+          bag.y = player.y - 10;
           continue;
         }
-        bag.vy += 0.2;
+        
+        // Física mejorada
+        bag.vy += 0.3; // Gravedad
+        bag.vx *= 0.99; // Resistencia del aire
+        bag.vy *= 0.995;
+        
         bag.x += bag.vx;
         bag.y += bag.vy;
 
+        // Colisión con el camión
         if (
-          bag.x > truck.x &&
-          bag.x < truck.x + truck.w &&
-          bag.y > truck.y &&
-          bag.y < truck.y + truck.h
+          bag.x > truck.x - 10 &&
+          bag.x < truck.x + truck.w + 10 &&
+          bag.y > truck.y - 10 &&
+          bag.y < truck.y + truck.h + 10 &&
+          !bag.grabbed
         ) {
-          score.value++;
+          score.value += 10;
           score.streak++;
-          if (score.streak % 3 === 0) score.value += 5;
+          if (score.streak % 3 === 0) score.value += 25;
           bag.active = false;
+          
+          // Partículas de éxito
+          for (let i = 0; i < 8; i++) {
+            particles.push({
+              x: bag.x,
+              y: bag.y,
+              vx: (Math.random() - 0.5) * 6,
+              vy: (Math.random() - 0.5) * 6,
+              life: 30,
+              maxLife: 30,
+              color: '#4f4'
+            });
+          }
         }
 
-        if (bag.y < 0 || bag.y > canvas.height || bag.x < 0 || bag.x > canvas.width) {
-          bag.active = false;
-          score.streak = 0;
+        // Remover bolsas fuera de pantalla
+        if (bag.y < -50 || bag.y > canvas.height + 50 || bag.x < -50 || bag.x > canvas.width + 50) {
+          if (!bag.grabbed) {
+            bag.active = false;
+            if (score.streak > 0) score.streak = 0;
+          }
         }
       }
+
+      // Actualizar partículas
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        p.vy += 0.2; // Gravedad en partículas
+        
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+        }
+      }
+
+      // Actualizar UI
+      document.getElementById('score').textContent = score.value;
+      document.getElementById('shots').textContent = score.shots;
+      document.getElementById('streak').textContent = score.streak;
     }
 
     function draw() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = '#333';
+      // Fondo de calle mejorado
+      ctx.fillStyle = '#2d5a27';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = '#555';
-      for (let i = 0; i < 40; i++) {
-        const y = (i * 40 + backgroundOffset % 40);
+      
+      // Aceras
+      ctx.fillStyle = '#666';
+      ctx.fillRect(0, 0, 150, canvas.height);
+      ctx.fillRect(330, 0, 150, canvas.height);
+      
+      // Calle
+      ctx.fillStyle = '#444';
+      ctx.fillRect(150, 0, 180, canvas.height);
+      
+      // Líneas de la calle
+      ctx.strokeStyle = '#ff4';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 50; i++) {
+        const y = (i * 60 + backgroundOffset % 60);
         ctx.beginPath();
         ctx.moveTo(240, y);
-        ctx.lineTo(240, y + 20);
+        ctx.lineTo(240, y + 30);
         ctx.stroke();
       }
 
-      ctx.fillStyle = '#4ac';
+      // Camión mejorado
+      ctx.fillStyle = '#2a4d3a';
       ctx.fillRect(truck.x, truck.y, truck.w, truck.h);
-      ctx.fillStyle = '#111';
-      ctx.fillRect(truck.x + 30, truck.y + truck.h - 40, 40, 20);
+      
+      // Cabina del camión
+      ctx.fillStyle = '#1a3d2a';
+      ctx.fillRect(truck.x + 20, truck.y + truck.h - 60, 60, 50);
+      
+      // Contenedor
+      ctx.fillStyle = '#3a5d4a';
+      ctx.fillRect(truck.x + 10, truck.y + 20, truck.w - 20, truck.h - 100);
+      
+      // Ruedas
+      ctx.fillStyle = '#222';
+      ctx.beginPath();
+      ctx.arc(truck.x + 25, truck.y + truck.h - 15, 12, 0, Math.PI * 2);
+      ctx.arc(truck.x + 75, truck.y + truck.h - 15, 12, 0, Math.PI * 2);
+      ctx.fill();
 
+      // Bolsas mejoradas
       for (let bag of bags) {
         if (!bag.active) continue;
+        
+        ctx.fillStyle = bag.color || '#c84';
         ctx.beginPath();
         ctx.arc(bag.x, bag.y, bag.r, 0, Math.PI * 2);
-        ctx.fillStyle = '#fc0';
+        ctx.fill();
+        
+        // Detalle de la bolsa
+        ctx.fillStyle = 'rgba(0,0,0,0.3)';
+        ctx.beginPath();
+        ctx.arc(bag.x - 2, bag.y - 2, bag.r * 0.7, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      ctx.fillStyle = '#0cf';
+      // Recolector mejorado
+      ctx.fillStyle = '#0af';
       ctx.beginPath();
-      ctx.arc(player.x + player.w / 2, player.y + player.h / 2, player.w, 0, Math.PI * 2);
+      ctx.arc(player.x + player.w / 2, player.y + player.h / 2, 12, 0, Math.PI * 2);
       ctx.fill();
+      
+      // Cuerpo del recolector
+      ctx.fillStyle = '#4a9eff';
+      ctx.fillRect(player.x + 4, player.y + 8, player.w - 8, player.h - 16);
+      
+      // Brazos
+      ctx.fillStyle = '#2a7eff';
+      ctx.fillRect(player.x - 2, player.y + 12, 6, 8);
+      ctx.fillRect(player.x + player.w - 4, player.y + 12, 6, 8);
 
-      ctx.fillStyle = '#fff';
-      ctx.font = '16px monospace';
-      ctx.fillText('Puntos: ' + score.value, 10, 20);
-      ctx.fillText('Lanzamientos: ' + score.shots, 10, 40);
+      // Sistema de apuntado
+      if (isAiming && player.hasBag) {
+        const startX = player.x + player.w / 2;
+        const startY = player.y + player.h / 2;
+        
+        // Línea de apuntado
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 + aimPower / 200})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(startX, startY);
+        const endX = startX + Math.cos(aimAngle) * (aimPower + 50);
+        const endY = startY + Math.sin(aimAngle) * (aimPower + 50);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
+        
+        // Indicador de potencia
+        ctx.fillStyle = `hsl(${120 - aimPower}, 70%, 50%)`;
+        ctx.fillRect(10, canvas.height - 30, (aimPower / 100) * 100, 10);
+        ctx.strokeStyle = '#fff';
+        ctx.strokeRect(10, canvas.height - 30, 100, 10);
+      }
 
+      // Partículas
+      for (let p of particles) {
+        const alpha = p.life / p.maxLife;
+        ctx.fillStyle = p.color ? p.color : `rgba(255, 200, 100, ${alpha})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Pantalla de fin de juego
       if (score.shots <= 0) {
         ctx.fillStyle = 'rgba(0,0,0,0.8)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#f00';
-        ctx.font = '24px monospace';
-        ctx.fillText('FIN DE LA RONDA', 120, 400);
+        ctx.fillStyle = '#f44';
+        ctx.font = 'bold 28px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('FIN DE LA RONDA', canvas.width / 2, canvas.height / 2 - 40);
+        ctx.fillStyle = '#fff';
+        ctx.font = '18px monospace';
+        ctx.fillText(`Puntuación Final: ${score.value}`, canvas.width / 2, canvas.height / 2);
+        ctx.fillText(`Mejor Racha: ${score.streak}`, canvas.width / 2, canvas.height / 2 + 30);
+        ctx.textAlign = 'start';
       }
     }
 
