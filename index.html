@@ -86,6 +86,7 @@
 
     const bags = [];
     const particles = [];
+    const vehicles = [];
     const score = { value: 0, streak: 0, shots: 5 };
 
     const scrollSpeed = 2;
@@ -99,16 +100,16 @@
       
       let x;
       if (side === 0) {
-        // Lado izquierdo
+        // Lado izquierdo (acera)
         x = Math.random() * (sideWidth - 30) + 15;
       } else {
-        // Lado derecho
+        // Lado derecho (acera)
         x = canvas.width - sideWidth + Math.random() * (sideWidth - 30) + 15;
       }
       
       bags.push({
         x: x,
-        y: canvas.height + Math.random() * 300,
+        y: Math.random() * canvas.height, // Aparecen en pantalla, no fuera
         r: 8,
         vx: 0,
         vy: 0,
@@ -118,16 +119,39 @@
       });
     }
 
+    // Función para generar vehículos de tráfico
+    function spawnVehicle() {
+      const lanes = [165, 200, 250, 285]; // Carriles de la calle
+      const colors = ['#e44', '#4e4', '#44e', '#ee4', '#e4e', '#4ee'];
+      
+      vehicles.push({
+        x: lanes[Math.floor(Math.random() * lanes.length)],
+        y: canvas.height + 50,
+        w: 20,
+        h: 40,
+        speed: Math.random() * 2 + 1,
+        color: colors[Math.floor(Math.random() * colors.length)],
+        active: true
+      });
+    }
+
     function spawnBagsPeriodically() {
-      if (bags.filter(b => b.active).length < 15) {
-        for (let i = 0; i < 3; i++) {
-          setTimeout(() => spawnBag(), i * 500);
-        }
+      if (bags.filter(b => b.active).length < 8) {
+        spawnBag();
       }
     }
 
-    setInterval(spawnBagsPeriodically, 2000);
-    for (let i = 0; i < 12; i++) spawnBag();
+    function spawnVehiclesPeriodically() {
+      if (Math.random() < 0.3 && vehicles.filter(v => v.active).length < 5) {
+        spawnVehicle();
+      }
+    }
+
+    setInterval(spawnBagsPeriodically, 1500);
+    setInterval(spawnVehiclesPeriodically, 2000);
+    
+    // Spawn inicial de bolsas
+    for (let i = 0; i < 8; i++) spawnBag();
 
     // Sistema de lanzamiento mejorado
     document.addEventListener('keydown', (e) => {
@@ -188,6 +212,76 @@
       // Mover bolsas con el scroll
       for (let bag of bags) {
         if (!bag.grabbed) bag.y -= scrollSpeed;
+      }
+
+      // Mover vehículos
+      for (let i = vehicles.length - 1; i >= 0; i--) {
+        const vehicle = vehicles[i];
+        vehicle.y -= vehicle.speed + scrollSpeed;
+        
+        // Remover vehículos que salen de pantalla
+        if (vehicle.y < -vehicle.h - 50) {
+          vehicles.splice(i, 1);
+          continue;
+        }
+        
+        // Colisión del camión con vehículos (esquivar)
+        if (
+          vehicle.x < truck.x + truck.w + 10 &&
+          vehicle.x + vehicle.w > truck.x - 10 &&
+          vehicle.y < truck.y + truck.h + 10 &&
+          vehicle.y + vehicle.h > truck.y - 10
+        ) {
+          // El camión se mueve para esquivar
+          if (vehicle.x < truck.x) {
+            truck.x += 2; // Esquiva hacia la derecha
+          } else {
+            truck.x -= 2; // Esquiva hacia la izquierda
+          }
+          
+          // Mantener el camión en la calle
+          truck.x = Math.max(160, Math.min(320 - truck.w, truck.x));
+        }
+        
+        // Colisión del recolector con vehículos
+        if (
+          vehicle.x < player.x + player.w + 5 &&
+          vehicle.x + vehicle.w > player.x - 5 &&
+          vehicle.y < player.y + player.h + 5 &&
+          vehicle.y + vehicle.h > player.y - 5
+        ) {
+          // El recolector pierde una bolsa si la tiene
+          if (player.hasBag) {
+            player.hasBag = false;
+            if (player.holding) {
+              player.holding.grabbed = false;
+              player.holding.vx = (Math.random() - 0.5) * 4;
+              player.holding.vy = (Math.random() - 0.5) * 4;
+              player.holding = null;
+            }
+          }
+          
+          // Empujar al recolector
+          if (vehicle.x < player.x) {
+            player.x += 15;
+          } else {
+            player.x -= 15;
+          }
+          player.x = Math.max(10, Math.min(canvas.width - player.w - 10, player.x));
+          
+          // Efectos visuales
+          for (let j = 0; j < 6; j++) {
+            particles.push({
+              x: player.x + player.w / 2,
+              y: player.y + player.h / 2,
+              vx: (Math.random() - 0.5) * 8,
+              vy: (Math.random() - 0.5) * 8,
+              life: 25,
+              maxLife: 25,
+              color: '#f44'
+            });
+          }
+        }
       }
 
       // Recolección de bolsas
@@ -319,6 +413,31 @@
       ctx.arc(truck.x + 25, truck.y + truck.h - 15, 12, 0, Math.PI * 2);
       ctx.arc(truck.x + 75, truck.y + truck.h - 15, 12, 0, Math.PI * 2);
       ctx.fill();
+
+      // Vehículos de tráfico
+      for (let vehicle of vehicles) {
+        if (!vehicle.active) continue;
+        
+        // Cuerpo del vehículo
+        ctx.fillStyle = vehicle.color;
+        ctx.fillRect(vehicle.x, vehicle.y, vehicle.w, vehicle.h);
+        
+        // Parabrisas
+        ctx.fillStyle = '#333';
+        ctx.fillRect(vehicle.x + 2, vehicle.y + 2, vehicle.w - 4, 8);
+        
+        // Ruedas
+        ctx.fillStyle = '#111';
+        ctx.fillRect(vehicle.x - 1, vehicle.y + 5, 3, 6);
+        ctx.fillRect(vehicle.x + vehicle.w - 2, vehicle.y + 5, 3, 6);
+        ctx.fillRect(vehicle.x - 1, vehicle.y + vehicle.h - 11, 3, 6);
+        ctx.fillRect(vehicle.x + vehicle.w - 2, vehicle.y + vehicle.h - 11, 3, 6);
+        
+        // Luces traseras
+        ctx.fillStyle = '#f44';
+        ctx.fillRect(vehicle.x + 1, vehicle.y + vehicle.h - 3, 3, 2);
+        ctx.fillRect(vehicle.x + vehicle.w - 4, vehicle.y + vehicle.h - 3, 3, 2);
+      }
 
       // Bolsas mejoradas
       for (let bag of bags) {
