@@ -1,16 +1,197 @@
 <!DOCTYPE html>
-<html>
-
+<html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width">
-  <title>replit</title>
-  <link href="style.css" rel="stylesheet" type="text/css" />
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Recolectores Arcade - Vista Cenital</title>
+  <style>
+    body {
+      margin: 0;
+      background: #111;
+      overflow: hidden;
+    }
+    canvas {
+      display: block;
+      margin: auto;
+      background: #444;
+      image-rendering: pixelated;
+    }
+  </style>
 </head>
-
 <body>
-  Hello world
-  <script src="script.js"></script>
-</body>
+  <canvas id="gameCanvas" width="480" height="800"></canvas>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
 
+    const keys = {};
+    document.addEventListener('keydown', (e) => keys[e.key] = true);
+    document.addEventListener('keyup', (e) => keys[e.key] = false);
+
+    const player = {
+      x: 240,
+      y: 700,
+      w: 20,
+      h: 20,
+      speed: 4,
+      hasBag: false,
+      holding: null,
+    };
+
+    const truck = {
+      x: 190,
+      y: 400,
+      w: 100,
+      h: 180
+    };
+
+    const bags = [];
+    const score = { value: 0, streak: 0, shots: 5 };
+
+    const scrollSpeed = 2;
+    let backgroundOffset = 0;
+
+    function spawnBag() {
+      const side = Math.random() < 0.5 ? 1 : -1;
+      const offsetX = Math.random() * 120;
+      bags.push({
+        x: 240 + side * (40 + offsetX),
+        y: canvas.height + Math.random() * 200,
+        r: 12,
+        vx: 0,
+        vy: 0,
+        active: true,
+        grabbed: false
+      });
+    }
+
+    function spawnBagsPeriodically() {
+      if (bags.filter(b => b.active).length < 50) {
+        for (let i = 0; i < 5; i++) spawnBag();
+      }
+    }
+
+    setInterval(spawnBagsPeriodically, 1000);
+    for (let i = 0; i < 30; i++) spawnBag();
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'a' && player.hasBag && player.holding) {
+        const dx = (truck.x + truck.w / 2 - player.x) * 0.1;
+        const dy = (truck.y + truck.h / 2 - player.y) * 0.1;
+        player.holding.vx = dx;
+        player.holding.vy = dy;
+        player.holding.grabbed = false;
+        player.holding = null;
+        player.hasBag = false;
+        score.shots--;
+      }
+    });
+
+    function update() {
+      if (keys['ArrowLeft']) player.x -= player.speed;
+      if (keys['ArrowRight']) player.x += player.speed;
+      player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+
+      backgroundOffset += scrollSpeed;
+
+      for (let bag of bags) {
+        if (!bag.grabbed) bag.y -= scrollSpeed;
+      }
+
+      for (let bag of bags) {
+        if (!bag.active || bag.grabbed) continue;
+        const dx = player.x + player.w / 2 - bag.x;
+        const dy = player.y + player.h / 2 - bag.y;
+        if (Math.sqrt(dx * dx + dy * dy) < bag.r + player.w / 2) {
+          player.holding = bag;
+          player.hasBag = true;
+          bag.grabbed = true;
+        }
+      }
+
+      for (let bag of bags) {
+        if (!bag.active) continue;
+        if (bag.grabbed) {
+          bag.x = player.x + player.w / 2;
+          bag.y = player.y;
+          continue;
+        }
+        bag.vy += 0.2;
+        bag.x += bag.vx;
+        bag.y += bag.vy;
+
+        if (
+          bag.x > truck.x &&
+          bag.x < truck.x + truck.w &&
+          bag.y > truck.y &&
+          bag.y < truck.y + truck.h
+        ) {
+          score.value++;
+          score.streak++;
+          if (score.streak % 3 === 0) score.value += 5;
+          bag.active = false;
+        }
+
+        if (bag.y < 0 || bag.y > canvas.height || bag.x < 0 || bag.x > canvas.width) {
+          bag.active = false;
+          score.streak = 0;
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      ctx.fillStyle = '#333';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.strokeStyle = '#555';
+      for (let i = 0; i < 40; i++) {
+        const y = (i * 40 + backgroundOffset % 40);
+        ctx.beginPath();
+        ctx.moveTo(240, y);
+        ctx.lineTo(240, y + 20);
+        ctx.stroke();
+      }
+
+      ctx.fillStyle = '#4ac';
+      ctx.fillRect(truck.x, truck.y, truck.w, truck.h);
+      ctx.fillStyle = '#111';
+      ctx.fillRect(truck.x + 30, truck.y + truck.h - 40, 40, 20);
+
+      for (let bag of bags) {
+        if (!bag.active) continue;
+        ctx.beginPath();
+        ctx.arc(bag.x, bag.y, bag.r, 0, Math.PI * 2);
+        ctx.fillStyle = '#fc0';
+        ctx.fill();
+      }
+
+      ctx.fillStyle = '#0cf';
+      ctx.beginPath();
+      ctx.arc(player.x + player.w / 2, player.y + player.h / 2, player.w, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.fillStyle = '#fff';
+      ctx.font = '16px monospace';
+      ctx.fillText('Puntos: ' + score.value, 10, 20);
+      ctx.fillText('Lanzamientos: ' + score.shots, 10, 40);
+
+      if (score.shots <= 0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.8)';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#f00';
+        ctx.font = '24px monospace';
+        ctx.fillText('FIN DE LA RONDA', 120, 400);
+      }
+    }
+
+    function gameLoop() {
+      update();
+      draw();
+      requestAnimationFrame(gameLoop);
+    }
+
+    gameLoop();
+  </script>
+</body>
 </html>
