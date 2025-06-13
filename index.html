@@ -35,7 +35,7 @@
     <div>Lanzamientos: <span id="shots">5</span></div>
     <div>Racha: <span id="streak">0</span></div>
     <div style="margin-top: 10px; font-size: 12px;">
-      Flechas: Mover | Espacio: Apuntar | A: Lanzar
+      Flechas: Mover | Espacio: Mantener para apuntar | A: Lanzar
     </div>
   </div>
   
@@ -45,9 +45,10 @@
 
     const keys = {};
     let isAiming = false;
-    let aimAngle = -Math.PI / 2; // Apuntando hacia arriba inicialmente
+    let aimAngle = -Math.PI / 2;
     let aimPower = 0;
     let powerDirection = 1;
+    let trajectoryPoints = [];
 
     document.addEventListener('keydown', (e) => {
       keys[e.key] = true;
@@ -55,7 +56,7 @@
         e.preventDefault();
         if (player.hasBag && !isAiming) {
           isAiming = true;
-          aimPower = 0;
+          aimPower = 20;
         }
       }
     });
@@ -81,7 +82,9 @@
       x: 190,
       y: 380,
       w: 100,
-      h: 200
+      h: 200,
+      targetX: 190,
+      moveSpeed: 3
     };
 
     const bags = [];
@@ -92,47 +95,77 @@
     const scrollSpeed = 2;
     let backgroundOffset = 0;
 
-    // Mejorar aparición de bolsas
+    // Función para calcular trayectoria parabólica
+    function calculateTrajectory(startX, startY, angle, power) {
+      const points = [];
+      const vx = Math.cos(angle) * power * 0.8;
+      const vy = Math.sin(angle) * power * 0.8;
+      
+      let x = startX;
+      let y = startY;
+      let velX = vx;
+      let velY = vy;
+      
+      for (let i = 0; i < 30; i++) {
+        points.push({ x: x, y: y });
+        x += velX;
+        y += velY;
+        velY += 0.3; // Gravedad
+        velX *= 0.99; // Resistencia del aire
+        
+        if (y > canvas.height) break;
+      }
+      
+      return points;
+    }
+
+    // Mejorar aparición de bolsas - ahora se mueven con la escenografía
     function spawnBag() {
-      const side = Math.random() < 0.5 ? 0 : 1; // 0 = izquierda, 1 = derecha
+      const side = Math.random() < 0.5 ? 0 : 1;
       const streetWidth = 180;
       const sideWidth = (canvas.width - streetWidth) / 2;
       
       let x;
       if (side === 0) {
-        // Lado izquierdo (acera)
         x = Math.random() * (sideWidth - 30) + 15;
       } else {
-        // Lado derecho (acera)
         x = canvas.width - sideWidth + Math.random() * (sideWidth - 30) + 15;
       }
       
       bags.push({
         x: x,
-        y: Math.random() * canvas.height, // Aparecen en pantalla, no fuera
+        y: canvas.height + Math.random() * 200, // Aparecen desde abajo
         r: 8,
         vx: 0,
         vy: 0,
         active: true,
         grabbed: false,
-        color: `hsl(${Math.random() * 60 + 15}, 70%, 50%)` // Colores variados
+        color: `hsl(${Math.random() * 60 + 15}, 70%, 50%)`,
+        worldY: canvas.height + Math.random() * 200 + backgroundOffset // Posición en el mundo
       });
     }
 
-    // Función para generar vehículos de tráfico
+    // Función mejorada para generar vehículos con direcciones
     function spawnVehicle() {
-      const lanes = [165, 200, 250, 285]; // Carriles de la calle
+      const lanes = [165, 200, 250, 285];
       const colors = ['#e44', '#4e4', '#44e', '#ee4', '#e4e', '#4ee'];
+      const direction = Math.random() < 0.7 ? 1 : -1; // 70% van hacia arriba, 30% hacia abajo
       
       vehicles.push({
         x: lanes[Math.floor(Math.random() * lanes.length)],
-        y: canvas.height + 50,
+        y: direction === 1 ? canvas.height + 50 : -50,
         w: 20,
         h: 40,
-        speed: Math.random() * 2 + 1,
+        speed: (Math.random() * 2 + 1) * direction,
         color: colors[Math.floor(Math.random() * colors.length)],
-        active: true
+        active: true,
+        direction: direction,
+        avoidingTruck: false,
+        originalX: 0,
+        avoidTimer: 0
       });
+      
+      vehicles[vehicles.length - 1].originalX = vehicles[vehicles.length - 1].x;
     }
 
     function spawnBagsPeriodically() {
@@ -142,23 +175,23 @@
     }
 
     function spawnVehiclesPeriodically() {
-      if (Math.random() < 0.3 && vehicles.filter(v => v.active).length < 5) {
+      if (Math.random() < 0.02 && vehicles.filter(v => v.active).length < 5) {
         spawnVehicle();
       }
     }
 
     setInterval(spawnBagsPeriodically, 1500);
-    setInterval(spawnVehiclesPeriodically, 2000);
+    setInterval(spawnVehiclesPeriodically, 100);
     
     // Spawn inicial de bolsas
     for (let i = 0; i < 8; i++) spawnBag();
 
-    // Sistema de lanzamiento mejorado
+    // Sistema de lanzamiento mejorado tipo básquet
     document.addEventListener('keydown', (e) => {
       if (e.key === 'a' && player.hasBag && player.holding && isAiming) {
         const power = aimPower / 100;
-        const dx = Math.cos(aimAngle) * power * 15;
-        const dy = Math.sin(aimAngle) * power * 15;
+        const dx = Math.cos(aimAngle) * power * 12;
+        const dy = Math.sin(aimAngle) * power * 12;
         
         player.holding.vx = dx;
         player.holding.vy = dy;
@@ -169,14 +202,15 @@
         isAiming = false;
         
         // Partículas de lanzamiento
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 8; i++) {
           particles.push({
             x: player.x + player.w / 2,
             y: player.y + player.h / 2,
-            vx: (Math.random() - 0.5) * 4,
-            vy: (Math.random() - 0.5) * 4,
-            life: 20,
-            maxLife: 20
+            vx: (Math.random() - 0.5) * 6 + dx * 0.2,
+            vy: (Math.random() - 0.5) * 6 + dy * 0.2,
+            life: 25,
+            maxLife: 25,
+            color: '#ffa500'
           });
         }
       }
@@ -188,59 +222,101 @@
       if (keys['ArrowRight']) player.x += player.speed;
       player.x = Math.max(10, Math.min(canvas.width - player.w - 10, player.x));
 
-      // Sistema de apuntado
+      // Sistema de apuntado mejorado tipo básquet
       if (isAiming && player.hasBag) {
-        if (keys['ArrowLeft']) aimAngle -= 0.05;
-        if (keys['ArrowRight']) aimAngle += 0.05;
+        if (keys['ArrowLeft']) aimAngle -= 0.03;
+        if (keys['ArrowRight']) aimAngle += 0.03;
+        if (keys['ArrowUp']) aimPower = Math.min(100, aimPower + 2);
+        if (keys['ArrowDown']) aimPower = Math.max(20, aimPower - 2);
         
-        // Limitar ángulo de apuntado
-        aimAngle = Math.max(-Math.PI, Math.min(0, aimAngle));
+        // Limitar ángulo de apuntado (más amplio para básquet)
+        aimAngle = Math.max(-Math.PI * 0.85, Math.min(-Math.PI * 0.15, aimAngle));
         
-        // Potencia oscilante
-        aimPower += powerDirection * 3;
-        if (aimPower >= 100) {
-          aimPower = 100;
-          powerDirection = -1;
-        } else if (aimPower <= 20) {
-          aimPower = 20;
-          powerDirection = 1;
-        }
+        // Calcular trayectoria en tiempo real
+        trajectoryPoints = calculateTrajectory(
+          player.x + player.w / 2,
+          player.y + player.h / 2,
+          aimAngle,
+          aimPower
+        );
       }
 
       backgroundOffset += scrollSpeed;
 
-      // Mover bolsas con el scroll
+      // Mover bolsas con la escenografía (como las líneas amarillas)
       for (let bag of bags) {
-        if (!bag.grabbed) bag.y -= scrollSpeed;
+        if (!bag.grabbed) {
+          bag.y -= scrollSpeed;
+          bag.worldY -= scrollSpeed;
+          
+          // Reposicionar bolsas que salen por arriba
+          if (bag.y < -50) {
+            bag.y = canvas.height + 100;
+            bag.worldY = canvas.height + 100 + backgroundOffset;
+            // Cambiar posición horizontal al reaparecer
+            const side = Math.random() < 0.5 ? 0 : 1;
+            const streetWidth = 180;
+            const sideWidth = (canvas.width - streetWidth) / 2;
+            if (side === 0) {
+              bag.x = Math.random() * (sideWidth - 30) + 15;
+            } else {
+              bag.x = canvas.width - sideWidth + Math.random() * (sideWidth - 30) + 15;
+            }
+            bag.color = `hsl(${Math.random() * 60 + 15}, 70%, 50%)`;
+          }
+        }
       }
 
-      // Mover vehículos
+      // Mover vehículos y lógica de esquivar mejorada
       for (let i = vehicles.length - 1; i >= 0; i--) {
         const vehicle = vehicles[i];
+        
+        // Detectar si el vehículo está cerca del camión
+        const distanceToTruck = Math.abs(vehicle.x - truck.x);
+        const verticalDistance = Math.abs(vehicle.y - truck.y);
+        
+        if (distanceToTruck < 80 && verticalDistance < 150) {
+          if (!vehicle.avoidingTruck) {
+            vehicle.avoidingTruck = true;
+            vehicle.avoidTimer = 60; // 1 segundo a 60fps
+            
+            // Determinar dirección de esquive
+            if (vehicle.x < truck.x) {
+              vehicle.x = Math.max(160, vehicle.x - 30); // Esquiva hacia la izquierda
+            } else {
+              vehicle.x = Math.min(310, vehicle.x + 30); // Esquiva hacia la derecha
+            }
+          }
+        }
+        
+        // Reducir timer de esquive
+        if (vehicle.avoidingTruck) {
+          vehicle.avoidTimer--;
+          if (vehicle.avoidTimer <= 0) {
+            vehicle.avoidingTruck = false;
+            // Volver gradualmente al carril original
+            const diff = vehicle.originalX - vehicle.x;
+            vehicle.x += diff * 0.1;
+          }
+        }
+        
+        // Movimiento normal del vehículo
         vehicle.y -= vehicle.speed + scrollSpeed;
         
         // Remover vehículos que salen de pantalla
-        if (vehicle.y < -vehicle.h - 50) {
+        if ((vehicle.direction === 1 && vehicle.y < -vehicle.h - 50) || 
+            (vehicle.direction === -1 && vehicle.y > canvas.height + 50)) {
           vehicles.splice(i, 1);
           continue;
         }
         
-        // Colisión del camión con vehículos (esquivar)
-        if (
-          vehicle.x < truck.x + truck.w + 10 &&
-          vehicle.x + vehicle.w > truck.x - 10 &&
-          vehicle.y < truck.y + truck.h + 10 &&
-          vehicle.y + vehicle.h > truck.y - 10
-        ) {
-          // El camión se mueve para esquivar
+        // Si el vehículo viene de contramano, el camión debe esquivarlo
+        if (vehicle.direction === -1 && verticalDistance < 100 && distanceToTruck < 60) {
           if (vehicle.x < truck.x) {
-            truck.x += 2; // Esquiva hacia la derecha
+            truck.targetX = Math.min(320 - truck.w, truck.x + 20);
           } else {
-            truck.x -= 2; // Esquiva hacia la izquierda
+            truck.targetX = Math.max(160, truck.x - 20);
           }
-          
-          // Mantener el camión en la calle
-          truck.x = Math.max(160, Math.min(320 - truck.w, truck.x));
         }
         
         // Colisión del recolector con vehículos
@@ -250,7 +326,6 @@
           vehicle.y < player.y + player.h + 5 &&
           vehicle.y + vehicle.h > player.y - 5
         ) {
-          // El recolector pierde una bolsa si la tiene
           if (player.hasBag) {
             player.hasBag = false;
             if (player.holding) {
@@ -284,6 +359,16 @@
         }
       }
 
+      // Movimiento suave del camión hacia su posición objetivo
+      const truckDiff = truck.targetX - truck.x;
+      if (Math.abs(truckDiff) > 1) {
+        truck.x += truckDiff * 0.1;
+      }
+      
+      // Mantener el camión en la calle
+      truck.x = Math.max(160, Math.min(320 - truck.w, truck.x));
+      truck.targetX = Math.max(160, Math.min(320 - truck.w, truck.targetX));
+
       // Recolección de bolsas
       for (let bag of bags) {
         if (!bag.active || bag.grabbed) continue;
@@ -296,7 +381,7 @@
         }
       }
 
-      // Física de bolsas
+      // Física de bolsas mejorada
       for (let bag of bags) {
         if (!bag.active) continue;
         if (bag.grabbed) {
@@ -305,20 +390,20 @@
           continue;
         }
         
-        // Física mejorada
+        // Física mejorada para lanzamiento
         bag.vy += 0.3; // Gravedad
-        bag.vx *= 0.99; // Resistencia del aire
-        bag.vy *= 0.995;
+        bag.vx *= 0.995; // Resistencia del aire más realista
+        bag.vy *= 0.998;
         
         bag.x += bag.vx;
         bag.y += bag.vy;
 
-        // Colisión con el camión
+        // Colisión con el camión mejorada
         if (
-          bag.x > truck.x - 10 &&
-          bag.x < truck.x + truck.w + 10 &&
-          bag.y > truck.y - 10 &&
-          bag.y < truck.y + truck.h + 10 &&
+          bag.x > truck.x - 15 &&
+          bag.x < truck.x + truck.w + 15 &&
+          bag.y > truck.y - 15 &&
+          bag.y < truck.y + truck.h + 15 &&
           !bag.grabbed
         ) {
           score.value += 10;
@@ -326,23 +411,23 @@
           if (score.streak % 3 === 0) score.value += 25;
           bag.active = false;
           
-          // Partículas de éxito
-          for (let i = 0; i < 8; i++) {
+          // Partículas de éxito tipo básquet
+          for (let i = 0; i < 12; i++) {
             particles.push({
               x: bag.x,
               y: bag.y,
-              vx: (Math.random() - 0.5) * 6,
-              vy: (Math.random() - 0.5) * 6,
-              life: 30,
-              maxLife: 30,
+              vx: (Math.random() - 0.5) * 8,
+              vy: (Math.random() - 0.5) * 8 - 3,
+              life: 40,
+              maxLife: 40,
               color: '#4f4'
             });
           }
         }
 
         // Remover bolsas fuera de pantalla
-        if (bag.y < -50 || bag.y > canvas.height + 50 || bag.x < -50 || bag.x > canvas.width + 50) {
-          if (!bag.grabbed) {
+        if (bag.y > canvas.height + 50 || bag.x < -50 || bag.x > canvas.width + 50) {
+          if (!bag.grabbed && bag.vx !== 0 && bag.vy !== 0) {
             bag.active = false;
             if (score.streak > 0) score.streak = 0;
           }
@@ -355,7 +440,8 @@
         p.x += p.vx;
         p.y += p.vy;
         p.life--;
-        p.vy += 0.2; // Gravedad en partículas
+        p.vy += 0.2;
+        p.vx *= 0.99;
         
         if (p.life <= 0) {
           particles.splice(i, 1);
@@ -384,7 +470,7 @@
       ctx.fillStyle = '#444';
       ctx.fillRect(150, 0, 180, canvas.height);
       
-      // Líneas de la calle
+      // Líneas de la calle (se mueven con la escenografía)
       ctx.strokeStyle = '#ff4';
       ctx.lineWidth = 3;
       for (let i = 0; i < 50; i++) {
@@ -424,7 +510,11 @@
         
         // Parabrisas
         ctx.fillStyle = '#333';
-        ctx.fillRect(vehicle.x + 2, vehicle.y + 2, vehicle.w - 4, 8);
+        if (vehicle.direction === 1) {
+          ctx.fillRect(vehicle.x + 2, vehicle.y + 2, vehicle.w - 4, 8);
+        } else {
+          ctx.fillRect(vehicle.x + 2, vehicle.y + vehicle.h - 10, vehicle.w - 4, 8);
+        }
         
         // Ruedas
         ctx.fillStyle = '#111';
@@ -433,10 +523,23 @@
         ctx.fillRect(vehicle.x - 1, vehicle.y + vehicle.h - 11, 3, 6);
         ctx.fillRect(vehicle.x + vehicle.w - 2, vehicle.y + vehicle.h - 11, 3, 6);
         
-        // Luces traseras
-        ctx.fillStyle = '#f44';
-        ctx.fillRect(vehicle.x + 1, vehicle.y + vehicle.h - 3, 3, 2);
-        ctx.fillRect(vehicle.x + vehicle.w - 4, vehicle.y + vehicle.h - 3, 3, 2);
+        // Luces (rojas para atrás, blancas para adelante)
+        if (vehicle.direction === 1) {
+          ctx.fillStyle = '#f44';
+          ctx.fillRect(vehicle.x + 1, vehicle.y + vehicle.h - 3, 3, 2);
+          ctx.fillRect(vehicle.x + vehicle.w - 4, vehicle.y + vehicle.h - 3, 3, 2);
+        } else {
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(vehicle.x + 1, vehicle.y + 1, 3, 2);
+          ctx.fillRect(vehicle.x + vehicle.w - 4, vehicle.y + 1, 3, 2);
+        }
+        
+        // Indicador de esquive
+        if (vehicle.avoidingTruck) {
+          ctx.strokeStyle = '#ff0';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(vehicle.x - 2, vehicle.y - 2, vehicle.w + 4, vehicle.h + 4);
+        }
       }
 
       // Bolsas mejoradas
@@ -470,34 +573,63 @@
       ctx.fillRect(player.x - 2, player.y + 12, 6, 8);
       ctx.fillRect(player.x + player.w - 4, player.y + 12, 6, 8);
 
-      // Sistema de apuntado
+      // Sistema de apuntado tipo básquet mejorado
       if (isAiming && player.hasBag) {
         const startX = player.x + player.w / 2;
         const startY = player.y + player.h / 2;
         
-        // Línea de apuntado
-        ctx.strokeStyle = `rgba(255, 255, 255, ${0.3 + aimPower / 200})`;
+        // Dibujar trayectoria predicha
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
         ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.beginPath();
+        for (let i = 0; i < trajectoryPoints.length - 1; i++) {
+          if (i === 0) {
+            ctx.moveTo(trajectoryPoints[i].x, trajectoryPoints[i].y);
+          } else {
+            ctx.lineTo(trajectoryPoints[i].x, trajectoryPoints[i].y);
+          }
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Puntos de trayectoria
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+        for (let i = 0; i < trajectoryPoints.length; i += 3) {
+          ctx.beginPath();
+          ctx.arc(trajectoryPoints[i].x, trajectoryPoints[i].y, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        
+        // Línea de dirección inicial
+        ctx.strokeStyle = `rgba(255, 100, 100, 0.8)`;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(startX, startY);
-        const endX = startX + Math.cos(aimAngle) * (aimPower + 50);
-        const endY = startY + Math.sin(aimAngle) * (aimPower + 50);
+        const endX = startX + Math.cos(aimAngle) * 40;
+        const endY = startY + Math.sin(aimAngle) * 40;
         ctx.lineTo(endX, endY);
         ctx.stroke();
         
-        // Indicador de potencia
-        ctx.fillStyle = `hsl(${120 - aimPower}, 70%, 50%)`;
-        ctx.fillRect(10, canvas.height - 30, (aimPower / 100) * 100, 10);
+        // Indicador de potencia tipo básquet
+        ctx.fillStyle = `hsl(${120 - (aimPower - 20)}, 70%, 50%)`;
+        ctx.fillRect(10, canvas.height - 50, (aimPower / 100) * 150, 15);
         ctx.strokeStyle = '#fff';
-        ctx.strokeRect(10, canvas.height - 30, 100, 10);
+        ctx.lineWidth = 2;
+        ctx.strokeRect(10, canvas.height - 50, 150, 15);
+        
+        // Texto de potencia
+        ctx.fillStyle = '#fff';
+        ctx.font = '12px monospace';
+        ctx.fillText(`Potencia: ${Math.round(aimPower)}%`, 10, canvas.height - 55);
       }
 
       // Partículas
       for (let p of particles) {
         const alpha = p.life / p.maxLife;
-        ctx.fillStyle = p.color ? p.color : `rgba(255, 200, 100, ${alpha})`;
+        ctx.fillStyle = p.color ? p.color.replace(')', `, ${alpha})`) : `rgba(255, 200, 100, ${alpha})`;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.arc(p.x, p.y, 2 + (1 - alpha) * 2, 0, Math.PI * 2);
         ctx.fill();
       }
 
