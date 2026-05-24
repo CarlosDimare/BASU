@@ -1,0 +1,27 @@
+# Node
+node_modules/
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / misc
+dist/
+tmp/
+*.log
+
+# Opencode data (sessions, auth - optional to commit or not)
+.local/
+.config/opencode/

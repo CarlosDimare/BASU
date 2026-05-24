@@ -1,0 +1,8 @@
+node_modules
+.git
+.replit
+.config
+.local
+.agents
+npm-debug.log
+.env

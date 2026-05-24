@@ -1,0 +1,23 @@
+{
+  "name": "opencode-chatbot",
+  "version": "1.0.0",
+  "description": "Chatbot simple y minimalista que usa opencode-ai como backend de IA. Listo para GitHub y deploy en Railway.",
+  "main": "server.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "opencode-ai": "^1.15.4"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tu-usuario/opencode-chatbot"
+  }
+}
