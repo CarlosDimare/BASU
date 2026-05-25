@@ -118,6 +118,28 @@ app.post("/chat", async (req, res) => {
   res.on("close", () => { try { proc.kill(); } catch (e) {} });
 });
 
+app.post("/save", async (req, res) => {
+  const { path, content, message } = req.body || {};
+  if (!path || !content) return res.status(400).json({ error: "path y content requeridos" });
+
+  const token = process.env.GITHUB_TOKEN;
+  if (!token) return res.status(500).json({ error: "GITHUB_TOKEN no configurado" });
+
+  try {
+    const r = await fetch(
+      `https://api.github.com/repos/CarlosDimare/BASU/contents/${path}`,
+      { method: "PUT",
+        headers: { Authorization: `token ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ message: message || "chatbot update",
+          content: Buffer.from(content).toString("base64") }) }
+    );
+    const data = await r.json();
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 OpenCode Chatbot listo en http://localhost:${PORT}`);
