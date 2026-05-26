@@ -14,6 +14,22 @@ const GH_OWNER = "CarlosDimare";
 const GH_REPO = "BASU";
 const MEM_PATH = "memoria.json";
 
+const STATUS_ES = {
+  read: "leyendo archivos",
+  search: "buscando",
+  grep: "buscando",
+  write: "escribiendo",
+  edit: "editando",
+  bash: "ejecutando",
+  glob: "explorando",
+  websearch: "buscando en la web",
+  webfetch: "consultando",
+  codesearch: "buscando código",
+  question: "preguntando",
+  task: "procesando",
+  todo: "actualizando",
+};
+
 const SYSTEM_PROMPT = `Sos un asistente de clase, breve como un telegrama y con el humor sutil de Les Luthiers.
 - Respondé en español, máximo 3 oraciones. Si preguntan la hora, decila y nada más.
 - Clase: sin vueltas, sin marketing, sin falsa amabilidad de manual.
@@ -23,25 +39,31 @@ const SYSTEM_PROMPT = `Sos un asistente de clase, breve como un telegrama y con 
 async function ghGet(path) {
   const t = process.env.GITHUB_TOKEN;
   if (!t) return null;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5000);
   try {
     const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
-      { headers: { Authorization: `token ${t}`, Accept: "application/vnd.github.v3.raw" } });
+      { signal: ac.signal,
+        headers: { Authorization: `token ${t}`, Accept: "application/vnd.github.v3.raw" } });
     if (!r.ok) return null;
     return r.text();
   } catch { return null; }
+  finally { clearTimeout(timer); }
 }
 
 async function ghPut(path, content, msg) {
   const t = process.env.GITHUB_TOKEN;
   if (!t) return;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), 5000);
   try {
-    const r = await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
-      { method: "PUT",
+    await fetch(`https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/contents/${path}`,
+      { signal: ac.signal, method: "PUT",
         headers: { Authorization: `token ${t}`, "Content-Type": "application/json" },
         body: JSON.stringify({ message: msg || "chatbot memory",
           content: Buffer.from(content).toString("base64") }) });
-    if (!r.ok) console.error("ghPut error", await r.text());
-  } catch (e) { console.error("ghPut", e.message); }
+  } catch { }
+  finally { clearTimeout(timer); }
 }
 
 async function loadMemory() {
@@ -49,31 +71,6 @@ async function loadMemory() {
   if (!raw) return [];
   try { const d = JSON.parse(raw); return Array.isArray(d) ? d.slice(-30) : []; }
   catch { return []; }
-}
-
-async function saveExchange(userMsg, botMsg) {
-  const hist = await loadMemory();
-  hist.push({ u: userMsg, b: botMsg, ts: new Date().toISOString() });
-  await ghPut(MEM_PATH, JSON.stringify(hist, null, 2), "memoria");
-}
-
-async function buildMessage(message, isNewSession, systemPrompt) {
-  const now = new Date().toLocaleString("es-AR", {
-    timeZone: "America/Argentina/Buenos_Aires", dateStyle: "full", timeStyle: "short",
-  });
-  let hist = "";
-  if (isNewSession) {
-    const mem = await loadMemory();
-    if (mem.length > 0) {
-      hist = "\n\n[HISTORIAL RECIENTE]\n" + mem.map(e =>
-        `usuario: ${e.u}\nasistente: ${e.b}`
-      ).join("\n") + "\n";
-    }
-  }
-  const base = isNewSession
-    ? `[INSTRUCCIONES DEL SISTEMA]\n${systemPrompt}${hist}\n\nFecha y hora actual: ${now}`
-    : `Fecha y hora actual: ${now}`;
-  return `${base}\n\n${message}`;
 }
 
 function sse(obj) {
@@ -95,14 +92,8 @@ app.post("/chat", async (req, res) => {
   }
 
   const isNewSession = !session_id;
-  const promptToUse = system_prompt || SYSTEM_PROMPT;
   const userMsg = message.trim();
-  const fullMessage = await buildMessage(userMsg, isNewSession, promptToUse);
-  let botResponse = "";
-
-  const args = ["run", "--format", "json"];
-  if (session_id) args.push("--session", session_id);
-  args.push(fullMessage);
+  const promptToUse = system_prompt || SYSTEM_PROMPT;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -110,6 +101,33 @@ app.post("/chat", async (req, res) => {
     "Connection": "keep-alive",
     "X-Accel-Buffering": "no",
   });
+
+  // Show initial status
+  res.write(sse({ type: "status", status: "pensando" }));
+
+  // Load memory in background for new sessions
+  let hist = "";
+  if (isNewSession) {
+    try {
+      const mem = await loadMemory();
+      if (mem.length > 0) {
+        hist = "\n\n[HISTORIAL RECIENTE]\n" + mem.map(e =>
+          `usuario: ${e.u}\nasistente: ${e.b}`
+        ).join("\n") + "\n";
+      }
+    } catch {}
+  }
+
+  const now = new Date().toLocaleString("es-AR", {
+    timeZone: "America/Argentina/Buenos_Aires", dateStyle: "full", timeStyle: "short",
+  });
+  const fullMessage = isNewSession
+    ? `[INSTRUCCIONES DEL SISTEMA]\n${promptToUse}${hist}\n\nFecha y hora actual: ${now}\n\n${userMsg}`
+    : `[Fecha y hora actual: ${now}]\n\n${userMsg}`;
+
+  const args = ["run", "--format", "json"];
+  if (session_id) args.push("--session", session_id);
+  args.push(fullMessage);
 
   let proc;
   try {
@@ -128,6 +146,7 @@ app.post("/chat", async (req, res) => {
   }
 
   let stderrBuf = "";
+  let botResponse = "";
   proc.stdout.setEncoding("utf8");
   proc.stdout.on("data", (chunk) => {
     const lines = chunk.split("\n");
@@ -144,11 +163,19 @@ app.post("/chat", async (req, res) => {
           res.write(sse({ type: "text", text: event.part.text }));
         }
         if (event.type === "step_start") {
-          res.write(sse({ type: "status", status: "..." }));
+          res.write(sse({ type: "status", status: "pensando" }));
         }
-      } catch (e) {
-        // Not JSON or partial, ignore
-      }
+        if (event.type === "reasoning") {
+          res.write(sse({ type: "status", status: "razonando" }));
+        }
+        if (event.type === "tool_use" && event.name) {
+          const s = STATUS_ES[event.name] || "procesando";
+          res.write(sse({ type: "status", status: s }));
+        }
+        if (event.type === "tool_result") {
+          res.write(sse({ type: "status", status: "pensando" }));
+        }
+      } catch {}
     }
   });
 
@@ -161,13 +188,17 @@ app.post("/chat", async (req, res) => {
     } else if (code !== 0 && stderrBuf.trim()) {
       res.write(sse({ type: "error", message: stderrBuf.trim().slice(0, 200) }));
     } else if (botResponse.trim()) {
-      saveExchange(userMsg, botResponse.trim());
+      // Save memory in background (fire & forget)
+      loadMemory().then(hist => {
+        hist.push({ u: userMsg, b: botResponse.trim(), ts: new Date().toISOString() });
+        ghPut(MEM_PATH, JSON.stringify(hist, null, 2), "memoria");
+      });
     }
     res.write(sse({ type: "done" }));
     res.end();
   });
 
-  res.on("close", () => { try { proc.kill(); } catch (e) {} });
+  res.on("close", () => { try { proc.kill(); } catch {} });
 });
 
 app.post("/save", async (req, res) => {

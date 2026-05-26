@@ -90,6 +90,7 @@ body {
 </div>
 
 <div id="chat" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:14px"></div>
+<div id="status" style="display:none;padding:4px 14px 6px;font-size:11px;opacity:.35;flex-shrink:0"></div>
 
 <div style="border-top:1px solid rgba(255,136,0,.15);padding:10px 12px;flex-shrink:0">
   <form id="f" style="display:flex;gap:6px;align-items:center;border:1px solid rgba(255,136,0,.2);border-radius:4px;padding:8px 12px;background:rgba(255,136,0,.02)">
@@ -107,6 +108,7 @@ const f = document.getElementById('f');
 const i = document.getElementById('i');
 const cp = document.getElementById('config-panel');
 const sp = document.getElementById('sys-prompt');
+const st = document.getElementById('status');
 
 // Load saved system prompt
 sp.value = localStorage.getItem('sys_prompt') || '';
@@ -230,6 +232,7 @@ async function send(t, isRetry = false) {
           } else if (d.type==='text' && d.text) {
             append(d.text);
           } else if (d.type==='error') {
+            st.style.display = 'none';
             if (d.message === 'SESSION_EXPIRED') {
                sid = null;
                localStorage.removeItem('sid');
@@ -239,7 +242,12 @@ async function send(t, isRetry = false) {
             add('b','⚠ '+(d.message||'error'));
             persist();
             fin(); return;
+          } else if (d.type==='status' && d.status) {
+            const s = d.status + '…';
+            st.textContent = s;
+            st.style.display = '';
           } else if (d.type==='done') {
+            st.style.display = 'none';
             persist();
             fin(); return;
           }
@@ -247,6 +255,7 @@ async function send(t, isRetry = false) {
       }
     }
   } catch(err) {
+    st.style.display = 'none';
     add('b','⚠ '+err.message);
     persist();
     fin();
