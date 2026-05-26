@@ -147,6 +147,18 @@ app.post("/chat", async (req, res) => {
 
   let stderrBuf = "";
   let botResponse = "";
+  let errored = false;
+
+  const procTimeout = setTimeout(() => {
+    if (proc.exitCode === null) {
+      proc.kill();
+      errored = true;
+      res.write(sse({ type: "error", message: "Tiempo de espera agotado" }));
+      res.write(sse({ type: "done" }));
+      res.end();
+    }
+  }, 60000);
+
   proc.stdout.setEncoding("utf8");
   proc.stdout.on("data", (chunk) => {
     const lines = chunk.split("\n");
@@ -155,25 +167,25 @@ app.post("/chat", async (req, res) => {
       if (!line) continue;
       try {
         const event = JSON.parse(line);
-        if (event.sessionID) {
+        if (event.sessionID)
           res.write(sse({ type: "session", session_id: event.sessionID }));
-        }
         if (event.type === "text" && event.part && event.part.text) {
           botResponse += event.part.text;
           res.write(sse({ type: "text", text: event.part.text }));
         }
-        if (event.type === "step_start") {
+        if (event.type === "step_start")
           res.write(sse({ type: "status", status: "pensando" }));
-        }
-        if (event.type === "reasoning") {
+        if (event.type === "reasoning")
           res.write(sse({ type: "status", status: "razonando" }));
-        }
         if (event.type === "tool_use" && event.name) {
           const s = STATUS_ES[event.name] || "procesando";
           res.write(sse({ type: "status", status: s }));
         }
-        if (event.type === "tool_result") {
+        if (event.type === "tool_result")
           res.write(sse({ type: "status", status: "pensando" }));
+        if (event.type === "error") {
+          errored = true;
+          res.write(sse({ type: "error", message: event.error || event.message || "Error" }));
         }
       } catch {}
     }
@@ -183,12 +195,15 @@ app.post("/chat", async (req, res) => {
   proc.stderr.on("data", (d) => { stderrBuf += d; });
 
   proc.on("close", (code) => {
-    if (code !== 0 && stderrBuf.includes("Session not found")) {
+    clearTimeout(procTimeout);
+    if (errored) { /* already handled */ }
+    else if (code !== 0 && stderrBuf.includes("Session not found")) {
       res.write(sse({ type: "error", message: "SESSION_EXPIRED" }));
     } else if (code !== 0 && stderrBuf.trim()) {
       res.write(sse({ type: "error", message: stderrBuf.trim().slice(0, 200) }));
+    } else if (code !== 0) {
+      res.write(sse({ type: "error", message: "Error sin respuesta del asistente" }));
     } else if (botResponse.trim()) {
-      // Save memory in background (fire & forget)
       loadMemory().then(hist => {
         hist.push({ u: userMsg, b: botResponse.trim(), ts: new Date().toISOString() });
         ghPut(MEM_PATH, JSON.stringify(hist, null, 2), "memoria");
